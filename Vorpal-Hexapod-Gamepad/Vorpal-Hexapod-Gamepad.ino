@@ -79,6 +79,8 @@ int debugmode = 0;          // Set to 1 to get more debug messages. Warning: thi
                             // to the serial monitor to help you figure out what values will work. After that you can
                             // modify the values in the decode_button() function below to suite your DPAD button module.
 
+//#define KEYPAD_DEBUG_ENABLED 250 // Debug D-pad enable, also set reading monitoring in millis
+
 #define USE_SDIO 0
 #include <SdFat.h>
 SdFat SD;
@@ -168,12 +170,34 @@ SoftwareSerial BlueTooth(A5,A4);  // connect bluetooth module Tx=A5=Yellow wire 
 #define REC_REWIND 14
 #define REC_ERASE 15
 
+// Keypad settings
+#if KEYPAD_DEBUG_ENABLED
+   char lastKeypadButton = '?';
+   long lastKeypadMillis = 0;
+#endif
+
 // Dpad styles. Some dpads use different output ranges for buttons
+#define KEYPAD_STYLE_QYF995 0
+#define KEYPAD_STYLE_STD 1
+#define KEYPAD_STYLE_ALT 2
+#define KEYPAD_STYLE_COUNT 3
+#define KEYPAD_KEYS_COUNT 5
+
 #define STDDPADSTYLE 0
 #define ALTDPADSTYLE 1
 #define NUMDPADSTYLES 2
 
-byte DpadStyle = STDDPADSTYLE;
+const char KEYPAD_COMMANDS[KEYPAD_KEYS_COUNT + 1] = {
+    'b', 'l', 'r', 'f', 'w', 's'
+};
+
+const int KEYPAD_MAP[KEYPAD_STYLE_COUNT][KEYPAD_KEYS_COUNT] = {
+    {  80, 230, 400, 615, 880 }, // DPAD_STYLE_QYF995
+    { 100, 200, 400, 600, 850 }, // DPAD_STYLE_STD
+    {  20,  60, 130, 250, 800 }  // DPAD_STYLE_ALT
+};
+
+byte DpadStyle = KEYPAD_STYLE_QYF995;
 
 // Pin definitions
 
@@ -307,53 +331,42 @@ int scanmatrix() {
 // and if you get one of those (not sold by Vorpal) you may need
 // to test out your dpad to find reasonable values and change
 // the values below.
-
 char decode_button(int b) {
+    #if KEYPAD_DEBUG_ENABLED
+        // Print keypad pin value
+        long now = millis();
+        if ((now - KEYPAD_DEBUG_ENABLED) > lastKeypadMillis) {
+            lastKeypadMillis = now;
+            Serial.print("Keypad value: ");
+            Serial.println(b);
+        }
+    #endif    
 
-#if DEPADDEBUG
-  Serial.print("DPAD: "); Serial.println(b);
-#endif
+    // In default, use default command STOP if no button pressed
+    char button = KEYPAD_COMMANDS[KEYPAD_KEYS_COUNT]; 
 
-// If your DPAD is doing the wrong things for each button, try using the ALTDPAD mode.
-// The gamepad will detect this automatically if you hold down the "Special" (top) DPAD button
-// while booting.
+    for (int i = 0; i < KEYPAD_KEYS_COUNT; i++) {
 
-  switch (DpadStyle) {
-  case ALTDPADSTYLE:
-    if (b < 20) {
-       return 'b';  // backward (bottom button)
-    } else if (b < 60) {
-       return 'l';  // left 
-    } else if (b < 130) {
-      return 'r';   // right
-    } else if (b < 250) {
-      return 'f';  // forward (top of diamond)
-    } else if (b < 800) {
-      return 'w';  // weapon (very top button) In the documentation this button is called "Special"
-                   // but a long time ago we called it "weapon" because it was used in some other
-                   // robot projects that were fighting robots. The code still uses "w" since "s" means stop.
-    } else {
-      return 's';  // stop (no button is pressed)
+        // If current input value less then key limit, return it
+        if (b < KEYPAD_MAP[DpadStyle][i]) {
+            button = KEYPAD_COMMANDS[i];
+            break;
+        }
     }
 
-  case STDDPADSTYLE:
-  default:
-    if (b < 100) {
-       return 'b';  // backward (bottom button)
-    } else if (b < 200) {
-       return 'l';  // left 
-    } else if (b < 400) {
-      return 'r';   // right
-    } else if (b < 600) {
-      return 'f';  // forward (top of diamond)
-    } else if (b < 850) {
-      return 'w';  // weapon (very top button) In the documentation this button is called "Special"
-                   // but a long time ago we called it "weapon" because it was used in some other
-                   // robot projects that were fighting robots. The code still uses "w" since "s" means stop.
-    } else {
-      return 's';  // stop (no button is pressed)
-    }
-  } // end of switch DpadStyle
+    #if KEYPAD_DEBUG_ENABLED
+        // Print detected button if changed
+        if (lastKeypadButton != button) {
+            lastKeypadButton = button;
+            Serial.print("Keypad button: ");
+            Serial.print(button);
+            Serial.print(" (");
+            Serial.print(b);
+            Serial.println(")");
+        }
+    #endif
+
+    return button;
 }
 
 //////////////////////////////////////////////////////////
