@@ -1,6 +1,6 @@
 // Copyright (C) 2017 Vorpal Robotics, LLC.
 
-const char *Version = "#GV2r1a";  // this version adds DPAD encoding auto-detect and EEPROM storage
+const char *Version = "#GV2r1a";  // this version adds KEYPAD encoding auto-detect and EEPROM storage
 
 // This is the code that runs on the robot in the Vorpal The Hexapod project.
 
@@ -72,12 +72,12 @@ int debugmode = 0;          // Set to 1 to get more debug messages. Warning: thi
                             // It also takes up a lot of memory and you might get warnings from Arduino about too little
                             // RAM being left. But it seems to work for me even with that warning.
 
-#define DEBUG_BUTTONS 1     // There is some manufacturer who is selling defective DPAD modules that look just like the
+#define DEBUG_BUTTONS 1     // There is some manufacturer who is selling defective KEYPAD modules that look just like the
                             // ones sold by Vorpal Robotics, and they have a different set of output values for each
                             // button (and only use a small percentage of the range of values, which is why I consider
                             // them to be defective). If you get one of those, set this define to 1 and you'll get debug info sent
                             // to the serial monitor to help you figure out what values will work. After that you can
-                            // modify the values in the decode_button() function below to suite your DPAD button module.
+                            // modify the values in the decode_button() function below to suite your KEYPAD button module.
 
 //#define KEYPAD_DEBUG_ENABLED 250 // Debug D-pad enable, also set reading monitoring in millis
 
@@ -99,7 +99,7 @@ SdFat SD;
 //
 //  The buttons on the left side are a 4x4 matrix, connected
 // to digital io ports 6-9 (columns) and 2-5 (rows)
-// the right side buttons in Dpad configuration are a set of
+// the right side buttons in Keypad configuration are a set of
 // resistive buttons and are on A1. Only one of those can be
 // detected at a time.
 //
@@ -137,8 +137,8 @@ SdFat SD;
 
 
 // Each movement mode (rows W, D, F) transmits the mode characters, for example W1 or D3, followed by the
-// DPAD characters: l, r, f, b, w, s.  These stand for left, right, forward, backward, weapon, and stop
-// and they correspond to dpad directions (weapon is the extra dpad button, stop is the lack of any button being pressed).
+// KEYPAD characters: l, r, f, b, w, s.  These stand for left, right, forward, backward, weapon, and stop
+// and they correspond to keypad directions (weapon is the extra keypad button, stop is the lack of any button being pressed).
 
 
 SoftwareSerial BlueTooth(A5,A4);  // connect bluetooth module Tx=A5=Yellow wire Rx=A4=Green Wire
@@ -176,33 +176,29 @@ SoftwareSerial BlueTooth(A5,A4);  // connect bluetooth module Tx=A5=Yellow wire 
    long lastKeypadMillis = 0;
 #endif
 
-// Dpad styles. Some dpads use different output ranges for buttons
-#define KEYPAD_STYLE_QYF995 0
-#define KEYPAD_STYLE_STD 1
-#define KEYPAD_STYLE_ALT 2
-#define KEYPAD_STYLE_COUNT 3
+// Keypad styles. Some keypads use different output ranges for buttons
+#define KEYPAD_TYPE_QYF995 0
+#define KEYPAD_TYPE_STANDARD 1
+#define KEYPAD_TYPE_ALTERNATIVE 2
+#define KEYPAD_TYPES_COUNT 3
 #define KEYPAD_KEYS_COUNT 5
-
-#define STDDPADSTYLE 0
-#define ALTDPADSTYLE 1
-#define NUMDPADSTYLES 2
 
 const char KEYPAD_COMMANDS[KEYPAD_KEYS_COUNT + 1] = {
     'b', 'l', 'r', 'f', 'w', 's'
 };
 
-const int KEYPAD_MAP[KEYPAD_STYLE_COUNT][KEYPAD_KEYS_COUNT] = {
-    {  80, 230, 400, 615, 880 }, // DPAD_STYLE_QYF995
-    { 100, 200, 400, 600, 850 }, // DPAD_STYLE_STD
-    {  20,  60, 130, 250, 800 }  // DPAD_STYLE_ALT
+const int KEYPAD_MAP[KEYPAD_TYPES_COUNT][KEYPAD_KEYS_COUNT] = {
+    {  80, 230, 400, 615, 880 }, // KEYPAD_STYLE_QYF995
+    { 100, 200, 400, 600, 850 }, // KEYPAD_STYLE_STD
+    {  20,  60, 130, 250, 800 }  // KEYPAD_STYLE_ALT
 };
 
-byte DpadStyle = KEYPAD_STYLE_QYF995;
+byte KeypadType = KEYPAD_TYPE_QYF995;
 
 // Pin definitions
 
-#define DpadPin A1
-#define VCCA1 A2    // we play a trick to power the dpad buttons, use adjacent unusued analog ports for power
+#define KEYPAD_PIN A1
+#define VCCA1 A2    // we play a trick to power the keypad buttons, use adjacent unusued analog ports for power
 #define GNDA1 A3    // Yes, you can make an analog port into a digital output!
 #define SDCHIPSELECT 10   // chip select pin for the SD card reader
 
@@ -216,7 +212,7 @@ byte DpadStyle = KEYPAD_STYLE_QYF995;
 unsigned long suppressButtonsUntil = 0;      // default is not to suppress until we see serial data
 File SDGamepadRecordFile;           // REC, holds the gamepad record/play file
 const char SDGamepadRecordFileName[] = "REC";   // never changes
-char SDScratchRecordFileName[4];    // three letters like W1f for walk mode 1 forward dpad, plus one more for end of string '\0'
+char SDScratchRecordFileName[4];    // three letters like W1f for walk mode 1 forward keypad, plus one more for end of string '\0'
 File SDScratchRecordFile;
 
 byte TrimMode = 0;
@@ -226,7 +222,7 @@ char SubmodeChars[] = {'1', '2', '3', '4'};
 
 char CurCmd = ModeChars[0];  // default is Walk mode
 char CurSubCmd = SubmodeChars[0]; // default is primary submode
-char CurDpad = 's'; // default is stop
+char CurKeypad = 's'; // default is stop
 unsigned int BeepFreq = 0;   // frequency of next beep command, 0 means no beep, should be range 50 to 2000 otherwise
 unsigned int BeepDur = 0;    // duration of next beep command, 0 means no beep, should be in range 1 to 30000 otherwise
                              // although if you go too short, like less than 30, you'll hardly hear anything
@@ -326,10 +322,10 @@ int scanmatrix() {
   return -1;
 }
 
-// This decodes which button is pressed on the DPAD
-// There are some DPAD modules that output different values
+// This decodes which button is pressed on the KEYPAD
+// There are some KEYPAD modules that output different values
 // and if you get one of those (not sold by Vorpal) you may need
-// to test out your dpad to find reasonable values and change
+// to test out your keypad to find reasonable values and change
 // the values below.
 char decode_button(int b) {
     #if KEYPAD_DEBUG_ENABLED
@@ -348,7 +344,7 @@ char decode_button(int b) {
     for (int i = 0; i < KEYPAD_KEYS_COUNT; i++) {
 
         // If current input value less then key limit, return it
-        if (b < KEYPAD_MAP[DpadStyle][i]) {
+        if (b < KEYPAD_MAP[KeypadType][i]) {
             button = KEYPAD_COMMANDS[i];
             break;
         }
@@ -735,14 +731,14 @@ void SDCardFormat() {
 // effectively just rewinds it.
 // Returns 1 if the open worked, otherwise 0
 //
-int openScratchRecordFile(char cmd, char subcmd, char dpad) {
+int openScratchRecordFile(char cmd, char subcmd, char keypad) {
   if (SDScratchRecordFile) {  // if one is already open, close it
     SDScratchRecordFile.close();
   }
 
   SDScratchRecordFileName[0] = cmd;
   SDScratchRecordFileName[1] = subcmd;
-  SDScratchRecordFileName[2] = dpad;
+  SDScratchRecordFileName[2] = keypad;
   SDScratchRecordFileName[3] = '\0';
  
   SDScratchRecordFile = SD.open(SDScratchRecordFileName, FILE_WRITE);
@@ -759,12 +755,12 @@ int openScratchRecordFile(char cmd, char subcmd, char dpad) {
 
 long LastRecChirp;  // keeps track of the last time we sent a "recording is happening" reminder chirp to the user
 
-void removeScratchRecordFile(char cmd, char subcmd, char dpad) {
+void removeScratchRecordFile(char cmd, char subcmd, char keypad) {
   SDScratchRecordFile.close();  // it's safe to do this even if the file is not open
 
   SDScratchRecordFileName[0] = cmd;
   SDScratchRecordFileName[1] = subcmd;
-  SDScratchRecordFileName[2] = dpad;
+  SDScratchRecordFileName[2] = keypad;
   SDScratchRecordFileName[3] = '\0';
   SD.remove(SDScratchRecordFileName);
 }
@@ -789,14 +785,14 @@ void removeAllRecordFiles() {
   char fname[4];
   char mode[] = "WDF";
   char num[] = "1234";
-  char dpad[] = "FBLRSW";
+  char keypad[] = "FBLRSW";
   fname[3] = '\0';
   for (int i = 0; i < 3; i++) {
     for (int j = 0; j < 4; j++) {
       for (int k = 0; k < 6; k++) {
         fname[0] = mode[i];
         fname[1] = num[j];
-        fname[2] = dpad[k];
+        fname[2] = keypad[k];
         SD.remove(fname);
       }    
     }
@@ -1018,7 +1014,7 @@ void RecordPlayHandler() {
         SDGamepadRecordFile.write(three);
         SDGamepadRecordFile.write(CurCmd);
         SDGamepadRecordFile.write(CurSubCmd);
-        SDGamepadRecordFile.write(CurDpad);
+        SDGamepadRecordFile.write(CurKeypad);
       }
       // we don't record headers or checksums. The SD card is considered a reliable device.
 #if  DEBUG_SD
@@ -1088,32 +1084,32 @@ void setup() {
     Serial.println("#SDBF");    // SD Begin Failed
   }
 
-  // see if auto-detect dpad button decoding style is selected (by user holding
-  // down top button on the dpad during boot. If not, then also check to see
-  // a DPAD button style has been previously stored in EEPROM at position 0
+  // see if auto-detect keypad button decoding style is selected (by user holding
+  // down top button on the keypad during boot. If not, then also check to see
+  // a KEYPAD button style has been previously stored in EEPROM at position 0
   //
-  int dp = analogRead(DpadPin);
-  //Serial.println(dp); // uncomment this if you're having trouble with DPAD autodetect
-  if (dp < 800) { // some dpad button is being held
-    Serial.print("#DP"); // DPAD AutoDetect
-    if (dp > 250 && dp < 500) { // Alternative dpad detected
-      DpadStyle = ALTDPADSTYLE;
+  int dp = analogRead(KEYPAD_PIN);
+  //Serial.println(dp); // uncomment this if you're having trouble with KEYPAD autodetect
+  if (dp < 800) { // some keypad button is being held
+    Serial.print("#DP"); // KEYPAD AutoDetect
+    if (dp > 250 && dp < 500) { // Alternative keypad detected
+      KeypadType = KEYPAD_TYPE_ALTERNATIVE;
       Serial.println("ALT");
-    } else if (dp > 600 && dp < 850) { // standard dpad
-      DpadStyle = STDDPADSTYLE;
+    } else if (dp > 600 && dp < 850) { // standard keypad
+      KeypadType = KEYPAD_TYPE_STANDARD;
       Serial.println("STD");
     } else {
       Serial.println(dp); // not detected, something's wrong, just leave it at the default
     }
-    EEPROM.update(0, DpadStyle); // save for future boots
+    EEPROM.update(0, KeypadType); // save for future boots
   } else {
-    // check to see if a prior dpad style has been selected and stored in the
+    // check to see if a prior keypad style has been selected and stored in the
     // EEPROM at position 0
     dp = EEPROM.read(0);
-    if (dp < NUMDPADSTYLES) { // any value greater or equal to NUMDPADSTYLES is invalid
-      DpadStyle = dp;
-      Serial.print("#DPE"); // DPAD EEPROM detect
-      if (DpadStyle == STDDPADSTYLE) { 
+    if (dp < KEYPAD_TYPES_COUNT) { // any value greater or equal to KEYPAD_TYPES_COUNT is invalid
+      KeypadType = dp;
+      Serial.print("#DPE"); // KEYPAD EEPROM detect
+      if (KeypadType == KEYPAD_TYPE_STANDARD) { 
         Serial.println("STD");
       } else {
         Serial.println("ALT");
@@ -1157,7 +1153,7 @@ void scratcherror(const char *state, char c) {
 int ScratchState = SCR_WAITING_FOR_HEADER;
 int ScratchXmitBytes = 0; // how many packet bytes did we get so far
 int ScratchLength = 0;    // length received in packet
-char ScratchSDFileName[3]; // the name of a scratch recording file which is a matrix/dpad combo like: W1b for "walk mode 1 backward dpad"
+char ScratchSDFileName[3]; // the name of a scratch recording file which is a matrix/keypad combo like: W1b for "walk mode 1 backward keypad"
 
 int handleSerialInput() {
 
@@ -1304,8 +1300,8 @@ int handleSerialInput() {
   return dataread;
 }
 
-void send_trim(int matrix, int dpad) {
-    int trim = dpad;
+void send_trim(int matrix, int keypad) {
+    int trim = keypad;
     
     if (matrix >= REC_RECORD) {
       //Serial.print("TRIM-MATRIX=");Serial.println(matrix);
@@ -1344,20 +1340,20 @@ void loop() {
         }
 #endif
   int matrix = scanmatrix();
-  CurDpad = decode_button(analogRead(DpadPin));
+  CurKeypad = decode_button(analogRead(KEYPAD_PIN));
   
   if (debugmode && matrix != -1) {
     Serial.print("#MA:LC=");Serial.print(longClick); Serial.print("m:"); Serial.println(matrix);
   }
   
-  if (debugmode && CurDpad != 's') {
-    //Serial.print("#DP:"); Serial.println(CurDpad);
+  if (debugmode && CurKeypad != 's') {
+    //Serial.print("#DP:"); Serial.println(CurKeypad);
   }
 
   if (TrimMode) {
-    // special mode where we just transmit the DPAD buttons or the buttons on the record line in a special way.
-    //if (CurDpad != 's') { Serial.print("#TRIM:"); Serial.println(CurDpad); }
-    send_trim(matrix, CurDpad);
+    // special mode where we just transmit the KEYPAD buttons or the buttons on the record line in a special way.
+    //if (CurKeypad != 's') { Serial.print("#TRIM:"); Serial.println(CurKeypad); }
+    send_trim(matrix, CurKeypad);
     delay(200);
     return;
   }
@@ -1570,12 +1566,12 @@ void loop() {
     if (SRecState == SREC_PLAYING && 
         SDScratchRecordFileName[0] == CurCmd && 
         SDScratchRecordFileName[1] == CurSubCmd && 
-        SDScratchRecordFileName[2] == CurDpad) {
+        SDScratchRecordFileName[2] == CurKeypad) {
           // if all those conditions are met then we're in the middle of playing
           // a recorded mode button action and everything is as it should be
 #if DEBUG_SD
           // PL = playing current button recording already 
-          Serial.print("#PLC:");Serial.print(CurCmd);Serial.print(CurSubCmd);Serial.println(CurDpad);
+          Serial.print("#PLC:");Serial.print(CurCmd);Serial.print(CurSubCmd);Serial.println(CurKeypad);
 #endif
     } else {
           // if we get here, we're supposed to be playing a special command, however
@@ -1583,14 +1579,14 @@ void loop() {
           SDScratchRecordFile.close();
           SRecState = SREC_STOPPED;
 #if DEBUG_SD
-          Serial.print("#PL:");Serial.print(CurCmd);Serial.print(CurSubCmd);Serial.print(CurDpad);Serial.print("/cur=");Serial.println(SDScratchRecordFileName);
+          Serial.print("#PL:");Serial.print(CurCmd);Serial.print(CurSubCmd);Serial.print(CurKeypad);Serial.print("/cur=");Serial.println(SDScratchRecordFileName);
 #endif
           // see if there exists a file for the current button sequence
           char cmdfile[4];
-          cmdfile[0] = CurCmd; cmdfile[1] = CurSubCmd; cmdfile[2] = CurDpad; cmdfile[3] = 0;
+          cmdfile[0] = CurCmd; cmdfile[1] = CurSubCmd; cmdfile[2] = CurKeypad; cmdfile[3] = 0;
           if (SD.exists(cmdfile)) {
             // it does exist so it should be opened and we should go into play mode
-            openScratchRecordFile(CurCmd, CurSubCmd, CurDpad);
+            openScratchRecordFile(CurCmd, CurSubCmd, CurKeypad);
 
             SRecState = SREC_PLAYING;
 #if DEBUG_SD
@@ -1598,7 +1594,7 @@ void loop() {
 #endif
           } else {
 #if DEBUG_SD
-            Serial.print("#NOPL:");Serial.print(cmdfile);Serial.print("/");Serial.print(CurCmd);Serial.print(CurSubCmd);Serial.println(CurDpad);
+            Serial.print("#NOPL:");Serial.print(cmdfile);Serial.print("/");Serial.print(CurCmd);Serial.print(CurSubCmd);Serial.println(CurKeypad);
 #endif
             // There is no recording for the current button sequence so we should drop out of play mode
             SRecState = SREC_STOPPED;
@@ -1642,18 +1638,18 @@ void loop() {
     //
 
     if (debugmode) {
-      Serial.print("#S="); Serial.print(CurCmd); Serial.print(CurSubCmd); Serial.println(CurDpad);
+      Serial.print("#S="); Serial.print(CurCmd); Serial.print(CurSubCmd); Serial.println(CurKeypad);
     }
     BlueTooth.print("V1"); // Vorpal hexapod radio protocol header version 1
     int eight=8;
     BlueTooth.write(eight);
     BlueTooth.write(CurCmd);
     BlueTooth.write(CurSubCmd);
-    BlueTooth.write(CurDpad);
+    BlueTooth.write(CurKeypad);
 
     unsigned int checksum = sendbeep(0);
 
-    checksum += eight+CurCmd+CurSubCmd+CurDpad;
+    checksum += eight+CurCmd+CurSubCmd+CurKeypad;
     checksum = (checksum % 256);
     BlueTooth.write(checksum);
     //BlueTooth.flush();
