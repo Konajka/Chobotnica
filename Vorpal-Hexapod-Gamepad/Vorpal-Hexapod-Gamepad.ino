@@ -187,6 +187,12 @@ const char KEYPAD_COMMANDS[KEYPAD_KEYS_COUNT + 1] = {
     'b', 'l', 'r', 'f', 'w', 's'
 };
 
+const char KEYPAD_NAMES[][KEYPAD_TYPES_COUNT] {
+    "QYF995", 
+    "STANDARD", 
+    "ALTERNATIVE"
+};
+
 const int KEYPAD_MAP[KEYPAD_TYPES_COUNT][KEYPAD_KEYS_COUNT] = {
     {  80, 230, 400, 615, 880 }, // KEYPAD_STYLE_QYF995
     { 100, 200, 400, 600, 850 }, // KEYPAD_STYLE_STD
@@ -1046,6 +1052,22 @@ void RecordPlayHandler() {
   }
 }
 
+// check to see if a prior keypad style has been selected and stored in the EEPROM
+// or set default keypad type
+void setupKeypadType() {
+    // get keypad type stored in the EEPROM at position 0
+    int keypadTypeStored = EEPROM.read(0);
+    if (keypadTypeStored < KEYPAD_TYPES_COUNT) { // any value greater or equal to KEYPAD_TYPES_COUNT is invalid
+        KeypadType = keypadTypeStored;
+        Serial.print("#KEYPAD EEPROM loaded: "); 
+        Serial.println(KEYPAD_NAMES[KeypadType]);
+    } else {
+        KeypadType = 0;
+        Serial.print("#KEYPAD default: "); 
+        Serial.println(KEYPAD_NAMES[KeypadType]);
+    }
+}
+
 void setup() {
     Serial.begin(9600);
   // see if we're supposed to be in trim mode or card format mode
@@ -1084,6 +1106,9 @@ void setup() {
     Serial.println("#SDBF");    // SD Begin Failed
   }
 
+  // Load keypad type or set default
+  setupKeypadType();
+
   // see if auto-detect keypad button decoding style is selected (by user holding
   // down top button on the keypad during boot. If not, then also check to see
   // a KEYPAD button style has been previously stored in EEPROM at position 0
@@ -1102,21 +1127,7 @@ void setup() {
       Serial.println(dp); // not detected, something's wrong, just leave it at the default
     }
     EEPROM.update(0, KeypadType); // save for future boots
-  } else {
-    // check to see if a prior keypad style has been selected and stored in the
-    // EEPROM at position 0
-    dp = EEPROM.read(0);
-    if (dp < KEYPAD_TYPES_COUNT) { // any value greater or equal to KEYPAD_TYPES_COUNT is invalid
-      KeypadType = dp;
-      Serial.print("#DPE"); // KEYPAD EEPROM detect
-      if (KeypadType == KEYPAD_TYPE_STANDARD) { 
-        Serial.println("STD");
-      } else {
-        Serial.println("ALT");
-      }
-    }
-  }
-  
+  }       
 }
 
 int priormatrix = -1;
