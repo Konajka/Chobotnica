@@ -79,7 +79,7 @@ int debugmode = 0;          // Set to 1 to get more debug messages. Warning: thi
                             // to the serial monitor to help you figure out what values will work. After that you can
                             // modify the values in the decode_button() function below to suite your KEYPAD button module.
 
-//#define KEYPAD_DEBUG_ENABLED 250 // Debug D-pad enable, also set reading monitoring in millis
+// #define KEYPAD_DEBUG_ENABLED 250 // Debug D-pad enable, also set reading monitoring in millis
 
 #define USE_SDIO 0
 #include <SdFat.h>
@@ -177,9 +177,12 @@ SoftwareSerial BlueTooth(A5,A4);  // connect bluetooth module Tx=A5=Yellow wire 
 #endif
 
 // Keypad styles. Some keypads use different output ranges for buttons
-#define KEYPAD_TYPE_QYF995 0
-#define KEYPAD_TYPE_STANDARD 1
-#define KEYPAD_TYPE_ALTERNATIVE 2
+#define KEYPAD_TYPE_ALTERNATIVE 0
+#define KEYPAD_TYPE_QYF995 1
+#define KEYPAD_TYPE_STANDARD 2
+
+#define KEYPAD_TYPE_DEFAULT KEYPAD_TYPE_QYF995
+
 #define KEYPAD_TYPES_COUNT 3
 #define KEYPAD_KEYS_COUNT 5
 
@@ -187,19 +190,19 @@ const char KEYPAD_COMMANDS[KEYPAD_KEYS_COUNT + 1] = {
     'b', 'l', 'r', 'f', 'w', 's'
 };
 
-const char KEYPAD_NAMES[][KEYPAD_TYPES_COUNT] {
+const char* KEYPAD_NAMES[KEYPAD_TYPES_COUNT] {
     "QYF995", 
     "STANDARD", 
     "ALTERNATIVE"
 };
 
 const int KEYPAD_MAP[KEYPAD_TYPES_COUNT][KEYPAD_KEYS_COUNT] = {
-    {  80, 230, 400, 615, 880 }, // KEYPAD_STYLE_QYF995
-    { 100, 200, 400, 600, 850 }, // KEYPAD_STYLE_STD
-    {  20,  60, 130, 250, 800 }  // KEYPAD_STYLE_ALT
+    {  20,  60, 130, 250, 800 }, // KEYPAD_TYPE_ALTERNATIVE
+    {  80, 230, 400, 615, 880 }, // KEYPAD_TYPE_QYF995
+    { 100, 200, 400, 600, 850 }  // KEYPAD_TYPE_STANDARD
 };
 
-byte KeypadType = KEYPAD_TYPE_QYF995;
+byte keypadType = KEYPAD_TYPE_DEFAULT;
 
 // Pin definitions
 
@@ -350,7 +353,7 @@ char decode_button(int b) {
     for (int i = 0; i < KEYPAD_KEYS_COUNT; i++) {
 
         // If current input value less then key limit, return it
-        if (b < KEYPAD_MAP[KeypadType][i]) {
+        if (b < KEYPAD_MAP[keypadType][i]) {
             button = KEYPAD_COMMANDS[i];
             break;
         }
@@ -1052,24 +1055,7 @@ void RecordPlayHandler() {
   }
 }
 
-// check to see if a prior keypad style has been selected and stored in the EEPROM
-// or set default keypad type
-void setupKeypadType() {
-    // get keypad type stored in the EEPROM at position 0
-    int keypadTypeStored = EEPROM.read(0);
-    if (keypadTypeStored < KEYPAD_TYPES_COUNT) { // any value greater or equal to KEYPAD_TYPES_COUNT is invalid
-        KeypadType = keypadTypeStored;
-        Serial.print("#KEYPAD EEPROM loaded: "); 
-        Serial.println(KEYPAD_NAMES[KeypadType]);
-    } else {
-        KeypadType = 0;
-        Serial.print("#KEYPAD default: "); 
-        Serial.println(KEYPAD_NAMES[KeypadType]);
-    }
-}
-
-void setup() {
-    Serial.begin(9600);
+void formatOrTrimSDCard() {
   // see if we're supposed to be in trim mode or card format mode
   int mat = scanmatrix();
   if (mat == WALK_1) {
@@ -1080,54 +1066,102 @@ void setup() {
     Serial.println("#sdfmt");
     SDCardFormat();
     Serial.println("#sdfmt done");
-  }
-  // make a characteristic flashing pattern to indicate the gamepad code is loaded.
-  pinMode(13, OUTPUT);
-  for (int i = 0; i < 3; i++) {
-    digitalWrite(13, !digitalRead(13));
-    delay(250);
-  }
-  // after this point you can't flash the led on pin 13 because we're using it for SD card
+  }    
+}
 
-  BlueTooth.begin(38400);
-
-  Serial.println(Version);
-
-  pinMode(A0, OUTPUT);  // extra ground for additional FTDI port if needed
-  digitalWrite(A0, LOW);
-  pinMode(VCCA1, OUTPUT);
-  pinMode(GNDA1, OUTPUT);
-  digitalWrite(GNDA1, LOW);
-  digitalWrite(VCCA1, HIGH);
-  pinMode(SDCHIPSELECT, OUTPUT);
-  digitalWrite(SDCHIPSELECT, HIGH); // chip select for SD card
-  
-  if (!SD.begin(SDCHIPSELECT)) {
-    Serial.println("#SDBF");    // SD Begin Failed
-  }
-
-  // Load keypad type or set default
-  setupKeypadType();
-
-  // see if auto-detect keypad button decoding style is selected (by user holding
-  // down top button on the keypad during boot. If not, then also check to see
-  // a KEYPAD button style has been previously stored in EEPROM at position 0
-  //
-  int dp = analogRead(KEYPAD_PIN);
-  //Serial.println(dp); // uncomment this if you're having trouble with KEYPAD autodetect
-  if (dp < 800) { // some keypad button is being held
-    Serial.print("#DP"); // KEYPAD AutoDetect
-    if (dp > 250 && dp < 500) { // Alternative keypad detected
-      KeypadType = KEYPAD_TYPE_ALTERNATIVE;
-      Serial.println("ALT");
-    } else if (dp > 600 && dp < 850) { // standard keypad
-      KeypadType = KEYPAD_TYPE_STANDARD;
-      Serial.println("STD");
+// check to see if a prior keypad style has been selected and stored in the EEPROM
+// or set default keypad type
+void setupKeypadType() {
+    // get keypad type stored in the EEPROM at position 0
+    int keypadTypeStored = EEPROM.read(0);
+    if (keypadTypeStored < KEYPAD_TYPES_COUNT) { // any value greater or equal to KEYPAD_TYPES_COUNT is invalid
+        keypadType = keypadTypeStored;
+        Serial.print("#KEYPAD loaded: "); 
+        Serial.println(KEYPAD_NAMES[keypadType]);
     } else {
-      Serial.println(dp); // not detected, something's wrong, just leave it at the default
+        keypadType = KEYPAD_TYPE_DEFAULT;
+        Serial.print("#KEYPAD default: "); 
+        Serial.println(KEYPAD_NAMES[keypadType]);
     }
-    EEPROM.update(0, KeypadType); // save for future boots
-  }       
+}
+
+// see if auto-detect keypad button decoding style is selected (by user holding
+// down bottom button on the keypad during boot.
+// returns true if keypad autodetected
+bool detectKeypadOnDemand() {
+
+    // Calculate keypad detection threshold
+    int maxKeypadValue = 0;
+    for (int i = 0; i < KEYPAD_TYPES_COUNT; i++) {
+        if (KEYPAD_MAP[i][KEYPAD_KEYS_COUNT - 1] > maxKeypadValue) { // find maximum keypad value
+            maxKeypadValue = KEYPAD_MAP[i][KEYPAD_KEYS_COUNT - 1];
+        }
+    }
+    int threshold = maxKeypadValue + ((1024 - maxKeypadValue) / 2);
+
+    // If not pressed some key on keypad, exit
+    int keypadValue = analogRead(KEYPAD_PIN);
+    
+    #if KEYPAD_DEBUG_ENABLED
+        Serial.print("Keypad autodetect threshold: ");
+        Serial.println(threshold);
+        Serial.print("Keypad autodetect value: ");
+        Serial.println(keypadValue);
+    #endif
+    
+    if (keypadValue > threshold) {
+        return false;
+    }
+
+    // Expect bottom button pressed, so compare currently read value with keypad definitions
+    // Keypad definitions must be sorted upwards by first value
+    for (int i = 0; i < KEYPAD_TYPES_COUNT; i++) {
+        if (keypadValue < KEYPAD_MAP[i][0]) { // found keypad definition
+            keypadType = i;
+            EEPROM.update(0, keypadType); // save for future boots
+            Serial.print("#KEYPAD detected: "); 
+            Serial.println(KEYPAD_NAMES[keypadType]);            
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void setup() {
+    Serial.begin(9600);
+
+    formatOrTrimSDCard();
+
+    // make a characteristic flashing pattern to indicate the gamepad code is loaded.
+    pinMode(13, OUTPUT);
+    for (int i = 0; i < 3; i++) {
+        digitalWrite(13, !digitalRead(13));
+        delay(250);
+    }
+    // after this point you can't flash the led on pin 13 because we're using it for SD card
+    
+    BlueTooth.begin(38400);
+    
+    Serial.println(Version);
+    
+    pinMode(A0, OUTPUT);  // extra ground for additional FTDI port if needed
+    digitalWrite(A0, LOW);
+    pinMode(VCCA1, OUTPUT);
+    pinMode(GNDA1, OUTPUT);
+    digitalWrite(GNDA1, LOW);
+    digitalWrite(VCCA1, HIGH);
+    pinMode(SDCHIPSELECT, OUTPUT);
+    digitalWrite(SDCHIPSELECT, HIGH); // chip select for SD card
+    
+    if (!SD.begin(SDCHIPSELECT)) {
+        Serial.println("#SDBF");    // SD Begin Failed
+    }
+    
+    // Load keypad type or set default or autodetect
+    if (!detectKeypadOnDemand()) {
+        setupKeypadType();
+    }    
 }
 
 int priormatrix = -1;
