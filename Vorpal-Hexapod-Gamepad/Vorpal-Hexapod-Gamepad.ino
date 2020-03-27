@@ -72,7 +72,7 @@ int debugmode = 0;          // Set to 1 to get more debug messages. Warning: thi
                             // It also takes up a lot of memory and you might get warnings from Arduino about too little
                             // RAM being left. But it seems to work for me even with that warning.
 
-#define DEBUG_BUTTONS 1     // There is some manufacturer who is selling defective KEYPAD modules that look just like the
+#define DEBUG_BUTTONS 0     // There is some manufacturer who is selling defective KEYPAD modules that look just like the
                             // ones sold by Vorpal Robotics, and they have a different set of output values for each
                             // button (and only use a small percentage of the range of values, which is why I consider
                             // them to be defective). If you get one of those, set this define to 1 and you'll get debug info sent
@@ -297,12 +297,27 @@ int scanmatrix() {
     
     for (int col = 0; col < MATRIX_NCOL; col++) {
       delayMicroseconds(100);
-      if (digitalRead(MATRIX_COL_START+col) == LOW) {
-        // we found the first pushed button
+      if (digitalRead(MATRIX_COL_START+col) == LOW) { // we found the first pushed button
+
+        #if DEBUG_BUTTONS
+            Serial.print("Matrix button pressed [row][col]: [");
+            Serial.print(row);
+            Serial.print("][");
+            Serial.print(col);
+            Serial.println("]");
+        #endif
+        
         if (row < 3) {
-          CurCmd = ModeChars[row];
-          CurSubCmd = SubmodeChars[col];
+            CurCmd = ModeChars[row];
+            CurSubCmd = SubmodeChars[col];
+            
+            #if DEBUG_BUTTONS
+                Serial.print("Matrix command: ");
+                Serial.print(CurCmd);
+                Serial.println(CurSubCmd);
+            #endif
         }
+        
         int curmatrix = row*MATRIX_NROW+col;
         int clicktime = millis() - curMatrixStartTime;
         if (curmatrix != priorMatrix) {
