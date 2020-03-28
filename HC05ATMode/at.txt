@@ -1,5 +1,27 @@
-Master/Gamepad
---------------
+UNO        HC-05
+----------------
+3V3 -----> EN
+5V  -----> VCC
+GND -----> GND
+TX  -----> TXD
+RX  --
+     |
+    [ ] 1k
+     |
+     o---> RXD
+     |
+    [ ] 2k
+     |
+    === GND
+
+Arduino IDE Serial monitor
+--------------------------
+ * set new line character to "Both NL&CR"
+ * set baud rate to 38400
+ * test with command AT, expected result is OK
+
+Master/Gamepad TOMAS
+--------------------
 AT+ADDR?
 AT+ROLE=1
 AT+CMODE=0
@@ -7,15 +29,25 @@ AT+NAME=HC05M_TOMAS_OVLADAC
 AT+BIND=98D3,33,F5AA29
 AT+UART=38400,0,0
 
-AT+NAME=HC05M_JIRKA_OVLADAC
-AT+BIND=
-
-Slave/Robot
------------
+Slave/Robot TOMAS
+-----------------
 AT+ADDR? 98D3:33:F5AA29
 AT+ROLE=0
 AT+NAME=HC05S_TOMAS_CHOBOTNICA
 AT+UART=38400,0,0
 
+Master/Gamepad JIRKA
+--------------------
+AT+ADDR? 98D3:31:F9595C
+AT+ROLE=1
+AT+CMODE=0
+AT+NAME=HC05M_JIRKA_OVLADAC
+AT+BIND=98D3,31,F95CEE
+AT+UART=38400,0,0
+
+Slave/Robot JIRKA
+-----------------
+AT+ADDR? 98D3:31:F95CEE
+AT+ROLE=0
 AT+NAME=HC05S_JIRKA_CHOBOTNICA
-AT+ADDR?
+AT+UART=38400,0,0
