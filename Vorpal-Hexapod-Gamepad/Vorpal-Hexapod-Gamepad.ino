@@ -191,9 +191,9 @@ const char KEYPAD_COMMANDS[KEYPAD_KEYS_COUNT + 1] = {
 };
 
 const char* KEYPAD_NAMES[KEYPAD_TYPES_COUNT] {
+    "ALTERNATIVE",
     "QYF995", 
-    "STANDARD", 
-    "ALTERNATIVE"
+    "STANDARD"    
 };
 
 const int KEYPAD_MAP[KEYPAD_TYPES_COUNT][KEYPAD_KEYS_COUNT] = {
@@ -1084,9 +1084,52 @@ void formatOrTrimSDCard() {
   }    
 }
 
+// get boot option from first row of matrix keyboard
+// buttons are valued as 1 2 4 8
+// function returns sum of all pressed buttons in first row
+int bootOptions() {
+    int result = 0;
+    int bootRow = 0;
+
+    // set all rows to high impedance mode
+    for (int row = 0; row < MATRIX_NROW; row++) {
+        pinMode(MATRIX_ROW_START + row, INPUT);
+    }
+
+    // set all columns to pullup inputs
+    for (int col = 0; col < MATRIX_NCOL; col++) {
+        pinMode(MATRIX_COL_START + col, INPUT_PULLUP);
+    } 
+
+        // set only the row we're looking at output low
+        pinMode(MATRIX_ROW_START + bootRow, OUTPUT);
+        digitalWrite(MATRIX_ROW_START + bootRow, LOW);
+
+        int effectiveValue = 1;
+        for (int col = 0; col < MATRIX_NCOL; col++) {
+            delayMicroseconds(100);
+
+            // test if button is pushed 
+            if (digitalRead(MATRIX_COL_START + col) == LOW) { 
+                result += effectiveValue;
+            }
+            effectiveValue *= 2;
+        }
+        
+    // set back to high impedance    
+    pinMode(MATRIX_ROW_START + bootRow, INPUT);  
+
+    #if KEYPAD_DEBUG_ENABLED
+        Serial.print("Boot options: ");
+        Serial.println(result);
+    #endif    
+    
+    return result;
+}
+
 // check to see if a prior keypad style has been selected and stored in the EEPROM
 // or set default keypad type
-void setupKeypadType() {
+void loadKeypadType() {
     // get keypad type stored in the EEPROM at position 0
     int keypadTypeStored = EEPROM.read(0);
     if (keypadTypeStored < KEYPAD_TYPES_COUNT) { // any value greater or equal to KEYPAD_TYPES_COUNT is invalid
@@ -1100,53 +1143,34 @@ void setupKeypadType() {
     }
 }
 
-// see if auto-detect keypad button decoding style is selected (by user holding
-// down bottom button on the keypad during boot.
-// returns true if keypad autodetected
-bool detectKeypadOnDemand() {
+// set or reset keypad type
+void updateKeypadType(int options) {
+    int keypadOption = -1;
 
-    // Calculate keypad detection threshold
-    int maxKeypadValue = 0;
+    int effectiveValue = 1;
     for (int i = 0; i < KEYPAD_TYPES_COUNT; i++) {
-        if (KEYPAD_MAP[i][KEYPAD_KEYS_COUNT - 1] > maxKeypadValue) { // find maximum keypad value
-            maxKeypadValue = KEYPAD_MAP[i][KEYPAD_KEYS_COUNT - 1];
+        if (options == effectiveValue) {
+            keypadOption = i;
+            break;
         }
-    }
-    int threshold = maxKeypadValue + ((1024 - maxKeypadValue) / 2);
-
-    // If not pressed some key on keypad, exit
-    int keypadValue = analogRead(KEYPAD_PIN);
-    
-    #if KEYPAD_DEBUG_ENABLED
-        Serial.print("Keypad autodetect threshold: ");
-        Serial.println(threshold);
-        Serial.print("Keypad autodetect value: ");
-        Serial.println(keypadValue);
-    #endif
-    
-    if (keypadValue > threshold) {
-        return false;
+        effectiveValue *= 2;
     }
 
-    // Expect bottom button pressed, so compare currently read value with keypad definitions
-    // Keypad definitions must be sorted upwards by first value
-    for (int i = 0; i < KEYPAD_TYPES_COUNT; i++) {
-        if (keypadValue < KEYPAD_MAP[i][0]) { // found keypad definition
-            keypadType = i;
-            EEPROM.update(0, keypadType); // save for future boots
-            Serial.print("#KEYPAD detected: "); 
-            Serial.println(KEYPAD_NAMES[keypadType]);            
-            return true;
-        }
+    // Set keypad type
+    if (keypadOption > -1) {
+        keypadType = keypadOption;
+        EEPROM.update(0, keypadType);
+        Serial.print("#KEYPAD set: "); 
+        Serial.println(KEYPAD_NAMES[keypadType]);        
+    } else if (options == 9) { // First and last button in first row
+        // Reset stored keyboard type
+        EEPROM.update(0, 0xff);
+        Serial.println("#KEYPAD reset"); 
     }
-
-    return false;
 }
 
 void setup() {
-    Serial.begin(9600);
-
-    formatOrTrimSDCard();
+    Serial.begin(9600);  
 
     // make a characteristic flashing pattern to indicate the gamepad code is loaded.
     pinMode(13, OUTPUT);
@@ -1172,10 +1196,14 @@ void setup() {
     if (!SD.begin(SDCHIPSELECT)) {
         Serial.println("#SDBF");    // SD Begin Failed
     }
-    
-    // Load keypad type or set default or autodetect
-    if (!detectKeypadOnDemand()) {
-        setupKeypadType();
+
+    // Get if boot options keys are pressed
+    int options = bootOptions();
+    if (options > 0) {
+        updateKeypadType(options);
+    } else {
+        loadKeypadType();
+        formatOrTrimSDCard();
     }    
 }
 
