@@ -170,12 +170,6 @@ SoftwareSerial BlueTooth(A5,A4);  // connect bluetooth module Tx=A5=Yellow wire 
 #define REC_REWIND 14
 #define REC_ERASE 15
 
-// Keypad settings
-#if KEYPAD_DEBUG_ENABLED
-   char lastKeypadButton = '?';
-   long lastKeypadMillis = 0;
-#endif
-
 // Keypad styles. Some keypads use different output ranges for buttons
 #define KEYPAD_TYPE_ALTERNATIVE 0
 #define KEYPAD_TYPE_QYF995 1
@@ -185,6 +179,9 @@ SoftwareSerial BlueTooth(A5,A4);  // connect bluetooth module Tx=A5=Yellow wire 
 
 #define KEYPAD_TYPES_COUNT 3
 #define KEYPAD_KEYS_COUNT 5
+
+#define KEYPAD_READ_INTERVAL 10
+#define KEYPAD_BUFFER_SIZE 5
 
 const char KEYPAD_COMMANDS[KEYPAD_KEYS_COUNT + 1] = {
     'b', 'l', 'r', 'f', 'w', 's'
@@ -203,6 +200,14 @@ const int KEYPAD_MAP[KEYPAD_TYPES_COUNT][KEYPAD_KEYS_COUNT] = {
 };
 
 byte keypadType = KEYPAD_TYPE_DEFAULT;
+long lastKeypadMillis = 0;
+char lastKeypadButton = '?';
+char lastPressedButton = KEYPAD_COMMANDS[KEYPAD_KEYS_COUNT]; 
+int keypadBuffer[KEYPAD_BUFFER_SIZE];  
+
+#if KEYPAD_DEBUG_ENABLED
+long lastKeypadDebugMillis = 0;
+#endif
 
 // Pin definitions
 
@@ -344,7 +349,21 @@ int scanmatrix() {
   priorMatrix = -1;
   curMatrixStartTime = 0;
   return -1;
+}  
+
+#if KEYPAD_DEBUG_ENABLED
+void dumpKeypadBuffer(char* title) {
+    Serial.print(title);
+    Serial.print(" [");
+    for (int i = 0; i < KEYPAD_BUFFER_SIZE; i++) {
+        Serial.print(keypadBuffer[i]);
+        if (i < (KEYPAD_BUFFER_SIZE - 1)) {
+            Serial.print(", ");
+        }
+    }
+    Serial.println("]");
 }
+#endif
 
 // This decodes which button is pressed on the KEYPAD
 // There are some KEYPAD modules that output different values
@@ -352,26 +371,52 @@ int scanmatrix() {
 // to test out your keypad to find reasonable values and change
 // the values below.
 char decode_button(int b) {
+
+    // Decode button every KEYPAD_READ_INTERVAL ms, otherwise return last pressed button
+    long now = millis();
+    if ((now - KEYPAD_READ_INTERVAL) < lastKeypadMillis) {
+        return lastPressedButton;        
+    }
+    lastKeypadMillis = now;
+
     #if KEYPAD_DEBUG_ENABLED
-        // Print keypad pin value
-        long now = millis();
-        if ((now - KEYPAD_DEBUG_ENABLED) > lastKeypadMillis) {
-            lastKeypadMillis = now;
+        // Debug print in interval
+        if ((now - KEYPAD_DEBUG_ENABLED) > lastKeypadDebugMillis) { 
+            lastKeypadDebugMillis = now;
             Serial.print("Keypad value: ");
             Serial.println(b);
         }
-    #endif    
+    #endif
 
     // In default, use default command STOP if no button pressed
     char button = KEYPAD_COMMANDS[KEYPAD_KEYS_COUNT]; 
 
+    // Add keypad value into buffer and check if ADC stable to read key
+    memcpy(keypadBuffer, &keypadBuffer[1], sizeof(keypadBuffer) - sizeof(keypadBuffer[0]));
+    keypadBuffer[KEYPAD_BUFFER_SIZE - 1] = b;
+
+    int rangeLow = 0;
     for (int i = 0; i < KEYPAD_KEYS_COUNT; i++) {
 
-        // If current input value less then key limit, return it
-        if (b < KEYPAD_MAP[keypadType][i]) {
+        // Get highest value of currently tested key
+        int rangeHigh = KEYPAD_MAP[keypadType][i];
+
+        bool passed = true;
+        for (int j = 0; j < KEYPAD_BUFFER_SIZE; j++) {
+            if ((keypadBuffer[j] < rangeLow) || (keypadBuffer[j] > rangeHigh)) {
+                passed = false;
+                break;
+            }
+        }        
+
+        // If all buffer values in range for given key, return it
+        if (passed) {
             button = KEYPAD_COMMANDS[i];
             break;
         }
+        
+
+        rangeLow = rangeHigh;
     }
 
     #if KEYPAD_DEBUG_ENABLED
@@ -380,12 +425,18 @@ char decode_button(int b) {
             lastKeypadButton = button;
             Serial.print("Keypad button: ");
             Serial.print(button);
-            Serial.print(" (");
-            Serial.print(b);
-            Serial.println(")");
+            Serial.print(" [");
+            for (int i = 0; i < KEYPAD_BUFFER_SIZE; i++) {
+                Serial.print(keypadBuffer[i]);
+                if (i < (KEYPAD_BUFFER_SIZE - 1)) {
+                    Serial.print(", ");
+                }
+            }
+            Serial.println("]");
         }
     #endif
 
+    lastPressedButton = button;
     return button;
 }
 
@@ -1127,6 +1178,16 @@ int bootOptions() {
     return result;
 }
 
+// Fill keypad buffer with ADC values
+void initKeypad() {
+    for (int i = 0; i < KEYPAD_BUFFER_SIZE; i++) {
+        keypadBuffer[i] = analogRead(KEYPAD_PIN); 
+        delay(1);
+    }   
+
+    lastKeypadMillis = millis();
+}
+
 // check to see if a prior keypad style has been selected and stored in the EEPROM
 // or set default keypad type
 void loadKeypadType() {
@@ -1205,6 +1266,7 @@ void setup() {
         loadKeypadType();
         formatOrTrimSDCard();
     }    
+    initKeypad();
 }
 
 int priormatrix = -1;
